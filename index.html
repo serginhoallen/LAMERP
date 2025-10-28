@@ -23,7 +23,6 @@
             height: 100vh;
         }
 
-        /* Sidebar */
         .sidebar {
             width: 260px;
             background: rgba(255, 255, 255, 0.95);
@@ -91,7 +90,6 @@
             font-weight: 600;
         }
 
-        /* Main Chat Area */
         .main-chat {
             flex: 1;
             display: flex;
@@ -104,12 +102,41 @@
             background: rgba(255, 255, 255, 0.98);
             border-bottom: 1px solid rgba(0, 0, 0, 0.1);
             box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
 
         .chat-header h2 {
             font-size: 20px;
             color: #333;
             font-weight: 600;
+        }
+
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 13px;
+            color: #666;
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #10b981;
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.offline {
+            background: #ef4444;
+            animation: none;
+        }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
         }
 
         .messages-container {
@@ -170,6 +197,7 @@
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
             line-height: 1.6;
             color: #333;
+            white-space: pre-wrap;
         }
 
         .user-message .message-content {
@@ -182,7 +210,43 @@
             margin-left: 44px;
         }
 
-        /* Input Area */
+        .typing-indicator {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 15px 20px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            margin-left: 44px;
+            width: fit-content;
+        }
+
+        .typing-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #667eea;
+            animation: typing 1.4s infinite;
+        }
+
+        .typing-dot:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+
+        .typing-dot:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+
+        @keyframes typing {
+            0%, 60%, 100% {
+                transform: translateY(0);
+            }
+            30% {
+                transform: translateY(-10px);
+            }
+        }
+
         .input-area {
             padding: 20px 30px;
             background: white;
@@ -241,7 +305,6 @@
             cursor: not-allowed;
         }
 
-        /* Welcome Screen */
         .welcome-screen {
             display: flex;
             flex-direction: column;
@@ -297,7 +360,15 @@
             margin: 0;
         }
 
-        /* Scrollbar */
+        .error-message {
+            background: #fee;
+            color: #c33;
+            padding: 12px;
+            border-radius: 8px;
+            margin: 20px;
+            border-left: 4px solid #c33;
+        }
+
         ::-webkit-scrollbar {
             width: 8px;
         }
@@ -318,7 +389,6 @@
 </head>
 <body>
     <div class="container">
-        <!-- Sidebar -->
         <div class="sidebar">
             <div class="sidebar-header">
                 <div class="logo">MINDERP</div>
@@ -329,10 +399,13 @@
             </div>
         </div>
 
-        <!-- Main Chat Area -->
         <div class="main-chat">
             <div class="chat-header">
                 <h2>MINDERP Assistant</h2>
+                <div class="status-indicator">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">Conectando...</span>
+                </div>
             </div>
             
             <div class="messages-container" id="messagesContainer">
@@ -381,8 +454,36 @@
 
     <script>
         let messages = [];
+        const API_URL = 'http://localhost:5000/chat';
+        const STATUS_URL = 'http://localhost:5000/status';
+        let isConnected = false;
 
-        function sendMessage() {
+        // Verifica conexão com Ollama ao carregar
+        async function checkConnection() {
+            try {
+                const response = await fetch(STATUS_URL);
+                isConnected = response.ok;
+                updateStatus(isConnected);
+            } catch (error) {
+                isConnected = false;
+                updateStatus(false);
+            }
+        }
+
+        function updateStatus(connected) {
+            const statusDot = document.getElementById('statusDot');
+            const statusText = document.getElementById('statusText');
+            
+            if (connected) {
+                statusDot.classList.remove('offline');
+                statusText.textContent = 'Online';
+            } else {
+                statusDot.classList.add('offline');
+                statusText.textContent = 'Offline';
+            }
+        }
+
+        async function sendMessage() {
             const input = document.getElementById('messageInput');
             const message = input.value.trim();
             
@@ -391,11 +492,84 @@
             addMessage('user', message);
             input.value = '';
             
-            // Simula resposta do bot
-            setTimeout(() => {
-                const botResponse = getBotResponse(message);
+            // Desabilita o botão de envio
+            const sendBtn = document.getElementById('sendBtn');
+            sendBtn.disabled = true;
+            
+            // Mostra indicador de digitação
+            showTypingIndicator();
+            
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({
+                        model: 'llama3',
+                        messages: [
+                            ...messages.map(m => ({
+                                role: m.type === 'user' ? 'user' : 'assistant',
+                                content: m.content
+                            })),
+                            {
+                                role: 'user',
+                                content: message
+                            }
+                        ],
+                        stream: false
+                    })
+                });
+
+                removeTypingIndicator();
+
+                if (!response.ok) {
+                    throw new Error('Erro na requisição');
+                }
+
+                const data = await response.json();
+                const botResponse = data.message.content;
+                
                 addMessage('bot', botResponse);
-            }, 1000);
+                updateStatus(true);
+                
+            } catch (error) {
+                removeTypingIndicator();
+                console.error('Erro:', error);
+                addMessage('bot', '❌ Erro ao conectar com o Ollama. Verifique se o serviço está rodando (ollama serve) e tente novamente.');
+                updateStatus(false);
+            } finally {
+                sendBtn.disabled = false;
+            }
+        }
+
+        function showTypingIndicator() {
+            const messagesContainer = document.getElementById('messagesContainer');
+            const typingDiv = document.createElement('div');
+            typingDiv.className = 'message bot-message';
+            typingDiv.id = 'typingIndicator';
+            
+            typingDiv.innerHTML = `
+                <div class="message-header">
+                    <div class="avatar bot-avatar">M</div>
+                    <strong>MINDERP</strong>
+                </div>
+                <div class="typing-indicator">
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                    <div class="typing-dot"></div>
+                </div>
+            `;
+            
+            messagesContainer.appendChild(typingDiv);
+            messagesContainer.scrollTop = messagesContainer.scrollHeight;
+        }
+
+        function removeTypingIndicator() {
+            const typingIndicator = document.getElementById('typingIndicator');
+            if (typingIndicator) {
+                typingIndicator.remove();
+            }
         }
 
         function sendSuggestion(text) {
@@ -430,24 +604,9 @@
             messages.push({ type, content });
         }
 
-        function getBotResponse(message) {
-            const lowerMessage = message.toLowerCase();
-            
-            if (lowerMessage.includes('ajudar') || lowerMessage.includes('ajuda')) {
-                return 'Olá! Sou o MINDERP, seu assistente inteligente. Posso ajudar você com suas regras de negócio Protheus, dúvidas sobre processos e muito mais! Como posso te auxiliar hoje?';
-            } else if (lowerMessage.includes('advpl')) {
-                return 'ADVPL (Advanced Protheus Language) é a linguagem de programação utilizada no ERP Protheus da TOTVS. É uma linguagem de alto nível, orientada a objetos e com sintaxe similar ao xBase. Posso te ajudar com exemplos específicos!';
-            } else if (lowerMessage.includes('código') || lowerMessage.includes('exemplo')) {
-                return 'Claro! Posso te mostrar exemplos de código em ADVPL, Java, Kotlin, Flutter ou JavaScript. Sobre qual linguagem você gostaria de ver exemplos?';
-            } else if (lowerMessage.includes('dica')) {
-                return 'Aqui vão algumas dicas importantes:\n\n1. Sempre comente seu código\n2. Use nomes descritivos para variáveis\n3. Mantenha funções pequenas e com responsabilidade única\n4. Teste seu código regularmente\n5. Utilize controle de versão (Git)\n\nQual dessas áreas você gostaria de explorar mais?';
-            } else {
-                return `Entendi sua pergunta sobre "${message}". Sou especialista em desenvolvimento e posso te ajudar com ADVPL, Protheus, Java, Kotlin, Flutter e JavaScript. Pode me fazer perguntas mais específicas sobre qualquer um desses tópicos!`;
-            } 
-        } 
-
         function handleKeyPress(event) {
-            if (event.key === 'Enter') {
+            if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
                 sendMessage();
             }
         }
@@ -481,8 +640,12 @@
             `;
         }
 
-        // Focus no input ao carregar
+        // Inicialização
         document.getElementById('messageInput').focus();
+        checkConnection();
+        
+        // Verifica conexão a cada 30 segundos
+        setInterval(checkConnection, 30000);
     </script>
 </body>
 </html>
